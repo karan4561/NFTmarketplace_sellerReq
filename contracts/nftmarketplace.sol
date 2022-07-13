@@ -2,24 +2,25 @@
 
 pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 
 contract NftMarketplace is ReentrancyGuard {
 
-    bool isETHsale;
+    //bool isETHsale;
     //address private saleTokenAddress;
-    IERC20 salesToken;
+    //IERC20 salesToken;
 
 
-    constructor(bool _isETHsale, address _saleTokenAddress){
+    /* constructor(bool _isETHsale, address _saleTokenAddress){
 
         isETHsale=_isETHsale;
        // saleTokenAddress=_saleTokenAddress;
         salesToken = IERC20(_saleTokenAddress);
     }
-
+        */
 
     //salesToken = IERC20(saleTokenAddress);
 
@@ -29,7 +30,7 @@ contract NftMarketplace is ReentrancyGuard {
             _;
         }
 
-        modifier isOwner(address nftAddress,uint256 tokenId, address spender){
+    modifier isOwner(address nftAddress,uint256 tokenId, address spender){
             IERC721 nft = IERC721(nftAddress);
             address owner = nft.ownerOf(tokenId);
 
@@ -37,10 +38,38 @@ contract NftMarketplace is ReentrancyGuard {
             _;
 
         }
+    
+    modifier isAuctionable(address nftAddress,uint256 tokenId,address caller){
+        require(sale_type[nftAddress][tokenId]==true);
+        IERC721 nft =IERC721(nftAddress);
+        address owner = nft.ownerOf(tokenId);
+
+        require(owner==caller);
+        _;
+    }
+
+    modifier onlyFactory(address nftAddress,uint256 tokenId){
+        require(msg.sender==s_listings[nftAddress][tokenId].factory);
+        _;
+    }
+
+    modifier onlyAfterStart(address nftAddress,uint256 tokenId){
+        require(a_listing[nftAddress][tokenId].startBlock>block.number);
+        _;
+    }
+
+    modifier onlyBeforeEnd(address nftAddress,uint256 tokenId){
+        require(a_listing[nftAddress][tokenId].endBlock<block.number);
+        _;
+    }
+
 
         struct Listing {
         uint256 price;
         address seller;
+        bool _isETHsale;
+        address _saleTokenAddress;
+        address factory;
         }
 
         event ItemListed(
@@ -59,41 +88,39 @@ contract NftMarketplace is ReentrancyGuard {
 
         mapping(address=>mapping(uint256=>Listing)) private s_listings;
         mapping(address=>uint256) private s_proceeds;
+        mapping(address=>mapping(uint256=>bool)) public sale_type;
 
         
 
 
-        function ListItem(address nftAddress, uint256 tokenId, uint256 price) external notListed(nftAddress, tokenId,msg.sender) isOwner(nftAddress,tokenId,msg.sender){
+        function ListItem(address nftAddress, uint256 tokenId, uint256 price, bool auction, bool _isEthSale, address _saleTokenAddress,address _factory) external notListed(nftAddress, tokenId,msg.sender) isOwner(nftAddress,tokenId,msg.sender){
 
+            require(msg.sender==_factory);
             require(price>0);
     //        IERC721 nft = IERC721(nftAddress);
 
-            s_listings[nftAddress][tokenId]=Listing(price,msg.sender);
+            s_listings[nftAddress][tokenId]=Listing(price,msg.sender,_isEthSale,_saleTokenAddress,_factory);
+            sale_type[nftAddress][tokenId]=auction;
 
             emit ItemListed(msg.sender,nftAddress,tokenId,price);
         }
 
-        function CancelListing(address nftAddress, uint256 tokenId) external isOwner(nftAddress,tokenId,msg.sender){
+        function CancelListing(address nftAddress, uint256 tokenId) external onlyFactory(nftAddress,tokenId){
 
             delete(s_listings[nftAddress][tokenId]);
+            delete(sale_type[nftAddress][tokenId]);
         }
 
-       // if(isETHsale==true) {
+        function ChangeSaleType(address nftAddress, uint256 tokenId, bool auction) external onlyFactory(nftAddress,tokenId){
 
+            sale_type[nftAddress][tokenId]=auction;
 
-        
+        }
 
-
-        // The BuyItem() is externally callable, accepts payments, and protects against re-entrancy.
-        // The payment received is not less than the listing’s price.
-        // The payment received is added to the seller’s proceeds.
-        // The listing is deleted after the exchange of value.
-        // The token is actually transferred to the buyer.
-        // The right event is emitted.
 
         function buyItemWithEth(address nftAddress, uint256 tokenId) external payable nonReentrant{
 
-            require(isETHsale==true,"ETH sale should be the token");
+            require(s_listings[nftAddress][tokenId]._isETHsale==true,"ETH sale should be the token");
             require(msg.value>=s_listings[nftAddress][tokenId].price);
 
             s_proceeds[s_listings[nftAddress][tokenId].seller]+=msg.value;
@@ -105,15 +132,15 @@ contract NftMarketplace is ReentrancyGuard {
         }
 
         function buyItemWithToken(address nftAddress, uint256 tokenId) external payable{
-            require(isETHsale==false);
+            require(s_listings[nftAddress][tokenId]._isETHsale==false);
             s_proceeds[s_listings[nftAddress][tokenId].seller]+=msg.value;
-            delete(s_lisitngs[nftAddress][tokenId]);
+            delete(s_listings[nftAddress][tokenId]);
+
+            IERC20 salesToken;
+            salesToken = IERC20(s_listings[nftAddress][tokenId]._saleTokenAddress);
 
             salesToken.transferFrom(msg.sender,s_listings[nftAddress][tokenId].seller,s_listings[nftAddress][tokenId].price);
             IERC721(nftAddress).safeTransferFrom(s_listings[nftAddress][tokenId].seller, msg.sender, tokenId);
-
-            
-
 
         }
 
@@ -124,13 +151,13 @@ contract NftMarketplace is ReentrancyGuard {
         // Updating the s_listing state mapping so that the correct Listing data object now refers to the updated price.
         // Emitting the right event. 
 
-        function updateListing(address nftAddress, uint256 tokenId,uint newPrice) external isOwner(nftAddress,tokenId,msg.sender){
+        function updateListing(address nftAddress, uint256 tokenId,uint newPrice) external onlyFactory(nftAddress,tokenId){
 
             require(newPrice>0);
-            s_listings[nftAddress][tokenId]=Listing(newPrice,msg.sender);
+            s_listings[nftAddress][tokenId].price=newPrice;
         }
 
-        function withdrawProceeds(address nftAddress, uint256 tokenId) external isOwner(nftAddress,tokenId,msg.sender){
+        function withdrawProceeds(address nftAddress, uint256 tokenId) external onlyFactory(nftAddress,tokenId){
         // delete(s_listings[nftAddress][tokenId]);
         uint256 proceeds = s_proceeds[msg.sender];
         require(proceeds>0);
@@ -146,4 +173,94 @@ contract NftMarketplace is ReentrancyGuard {
         function getProceeding(address seller) external view returns(uint256){
             return s_proceeds[seller];
         }
+
+
+
+        // ************AUCTION*************AUCTION***************** //
+
+        struct nftForAuction{
+            address seller;
+            uint256 startBlock;
+            uint256 endBlock;
+            uint256 currentPrice;
+            address highest_bidder;
+            bool start;
+            bool _isETHsale;
+            address _saleTokenAddress;
+            address factory;
+            uint256 unique;
+        }
+
+        mapping(address=>mapping(uint256=>nftForAuction)) a_listing;
+       // mapping(address=>uint256) balance;
+
+
+
+        //uint256 private salesStartBlock;
+        //uint256 private salesEndBlock;
+
+        uint256 _unique;
+        mapping(uint256=>mapping(address=>uint256)) _balance;
+
+        function setAuction(address nftAddress, uint256 tokenId, uint256 _salesStartBlock, uint256 _salesEndBlock, uint256 startPrice, bool _isEthSale, address _saleTokenAddress, address _factory) external isAuctionable(nftAddress,tokenId,msg.sender){
+
+            require(_salesEndBlock>_salesStartBlock);
+            require(_salesStartBlock>block.number);
+
+            //mapping(address=>uint256) _balance;
+
+            nftForAuction memory nft = nftForAuction(msg.sender,_salesStartBlock,_salesEndBlock,startPrice,address(0),true,_isEthSale,_saleTokenAddress,_factory,_unique);
+
+            _unique++;
+
+            a_listing[nftAddress][tokenId]=nft;
+
+        }
+
+        function withdrawFromAuction(address nftAddress,uint256 tokenId) external onlyFactory(nftAddress,tokenId){
+
+            require(msg.sender!=a_listing[nftAddress][tokenId].highest_bidder);
+            
+            uint256 x=a_listing[nftAddress][tokenId].unique;
+            uint256 amt = _balance[x][msg.sender];
+
+            _balance[x][msg.sender]=0;
+
+            payable(msg.sender).transfer(amt);
+
+        }
+
+        function bid(address nftAddress,uint256 tokenId,uint256 amount) external payable onlyAfterStart(nftAddress,tokenId) onlyBeforeEnd(nftAddress,tokenId){
+            
+            uint256 x=a_listing[nftAddress][tokenId].unique;
+            uint256 newBid= _balance[x][msg.sender]+amount;
+
+            require(newBid>a_listing[nftAddress][tokenId].currentPrice);
+
+            _balance[x][msg.sender]=newBid;
+
+            a_listing[nftAddress][tokenId].currentPrice=newBid;
+            a_listing[nftAddress][tokenId].highest_bidder=msg.sender;
+
+        }
+
+        function resolve(address nftAddress,uint256 tokenId) external onlyFactory(nftAddress,tokenId){
+
+            require(block.number>a_listing[nftAddress][tokenId].endBlock);
+
+            IERC721(nftAddress).safeTransferFrom(a_listing[nftAddress][tokenId].seller,a_listing[nftAddress][tokenId].highest_bidder,tokenId);
+
+            if(a_listing[nftAddress][tokenId]._isETHsale==false){
+
+                IERC20 salesToken;
+                salesToken = IERC20(a_listing[nftAddress][tokenId]._saleTokenAddress);
+
+                salesToken.transferFrom(msg.sender,a_listing[nftAddress][tokenId].seller,a_listing[nftAddress][tokenId].currentPrice);
+
+            }
+
+        }
+
+
+
     }
