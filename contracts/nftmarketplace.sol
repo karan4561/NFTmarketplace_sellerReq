@@ -24,6 +24,11 @@ contract NftMarketplace is ReentrancyGuard {
 
     //salesToken = IERC20(saleTokenAddress);
 
+
+
+
+    //modifiers list
+
     modifier notListed(address nftAddress,uint256 tokenId,address owner){
             Listing memory listing= s_listings[nftAddress][tokenId];
             require(listing.price==0);
@@ -91,6 +96,7 @@ contract NftMarketplace is ReentrancyGuard {
         mapping(address=>mapping(uint256=>bool)) public sale_type;
 
         
+// #####  Listing the item on the marketplace
 
 
         function ListItem(address nftAddress, uint256 tokenId, uint256 price, bool auction, bool _isEthSale, address _saleTokenAddress,address _factory) external notListed(nftAddress, tokenId,msg.sender) isOwner(nftAddress,tokenId,msg.sender){
@@ -110,6 +116,9 @@ contract NftMarketplace is ReentrancyGuard {
             delete(s_listings[nftAddress][tokenId]);
             delete(sale_type[nftAddress][tokenId]);
         }
+
+        // if one wishes to change direct sale to auctions and vice versa
+        //bool data type in struct set by user to decide if the nft goes on direct sale or auction
 
         function ChangeSaleType(address nftAddress, uint256 tokenId, bool auction) external onlyFactory(nftAddress,tokenId){
 
@@ -147,15 +156,14 @@ contract NftMarketplace is ReentrancyGuard {
 
         // Checking that the item is already listed and the caller owns the token.
         // Checking that the new price is not zero.
-        // Guarding against re-entrancy. 
-        // Updating the s_listing state mapping so that the correct Listing data object now refers to the updated price.
-        // Emitting the right event. 
 
         function updateListing(address nftAddress, uint256 tokenId,uint newPrice) external onlyFactory(nftAddress,tokenId){
 
             require(newPrice>0);
             s_listings[nftAddress][tokenId].price=newPrice;
         }
+
+
 
         function withdrawProceeds(address nftAddress, uint256 tokenId) external onlyFactory(nftAddress,tokenId){
         // delete(s_listings[nftAddress][tokenId]);
@@ -166,6 +174,8 @@ contract NftMarketplace is ReentrancyGuard {
             (bool success, ) = payable(msg.sender).call{value: proceeds}("");
             require(success,"Transfer Failed");
         }
+
+        //get listings and proceedings
 
         function getListing(address nftAddress,uint256 tokenURI) external view returns(Listing memory){
             return s_listings[nftAddress][tokenURI];
@@ -199,8 +209,11 @@ contract NftMarketplace is ReentrancyGuard {
         //uint256 private salesStartBlock;
         //uint256 private salesEndBlock;
 
-        uint256 _unique;
-        mapping(uint256=>mapping(address=>uint256)) _balance;
+        uint256 _unique;   // a unique token id for each nft, helps in getting the balance of each user for different nfts 
+        mapping(uint256=>mapping(address=>uint256)) _balance;   
+
+
+        //Participate in auction!!
 
         function setAuction(address nftAddress, uint256 tokenId, uint256 _salesStartBlock, uint256 _salesEndBlock, uint256 startPrice, bool _isEthSale, address _saleTokenAddress, address _factory) external isAuctionable(nftAddress,tokenId,msg.sender){
 
@@ -217,11 +230,13 @@ contract NftMarketplace is ReentrancyGuard {
 
         }
 
+
+
         function withdrawFromAuction(address nftAddress,uint256 tokenId) external onlyFactory(nftAddress,tokenId){
 
             require(msg.sender!=a_listing[nftAddress][tokenId].highest_bidder);
             
-            uint256 x=a_listing[nftAddress][tokenId].unique;
+            uint256 x=a_listing[nftAddress][tokenId].unique;  // x represents unique nft number, subs for token id
             uint256 amt = _balance[x][msg.sender];
 
             _balance[x][msg.sender]=0;
@@ -229,6 +244,10 @@ contract NftMarketplace is ReentrancyGuard {
             payable(msg.sender).transfer(amt);
 
         }
+
+
+        //place a bid in the auctions
+        //update in the listings
 
         function bid(address nftAddress,uint256 tokenId,uint256 amount) external payable onlyAfterStart(nftAddress,tokenId) onlyBeforeEnd(nftAddress,tokenId){
             
@@ -243,6 +262,8 @@ contract NftMarketplace is ReentrancyGuard {
             a_listing[nftAddress][tokenId].highest_bidder=msg.sender;
 
         }
+
+        //tranfer nft ownership after the end of the time for each nft
 
         function resolve(address nftAddress,uint256 tokenId) external onlyFactory(nftAddress,tokenId){
 
